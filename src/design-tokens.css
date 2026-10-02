@@ -1,0 +1,13 @@
+.bookmark-app {
+  --radius-field: 17px;
+  --radius-surface: 19px;
+  --radius-card: 16px;
+  --radius-thumbnail: 14px;
+  --space-page: 22px;
+  --space-grid: 15px;
+  --font-body: 16px;
+  --font-meta: 13px;
+  --motion-fast: 150ms;
+  --motion-normal: 220ms;
+  --content-max: 430px;
+}
