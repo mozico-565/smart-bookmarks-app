@@ -55,6 +55,7 @@ import {
   type Collection,
   type Kind,
 } from "./data";
+import { analyzeImage, getVisionKey, setVisionKey } from "./vision";
 import "./design-tokens.css";
 import "./prototype.css";
 type Page =
@@ -70,6 +71,7 @@ type Draft = {
   assetId?: string;
   preview?: string;
   ocr: string;
+  visualText: string;
   fileName?: string;
   id?: string;
 };
@@ -97,6 +99,7 @@ const emptyDraft = (kind: Kind = "link"): Draft => ({
   tags: "",
   collectionId: "",
   ocr: "",
+  visualText: "",
 });
 const IconButton = ({
   label,
@@ -151,6 +154,7 @@ export function BookmarkApp({
     [collectionName, setCollectionName] = useState(""),
     [urls, setUrls] = useState<Record<string, string>>({}),
     [ocrStatus, setOcrStatus] = useState(""),
+    [visionStatus, setVisionStatus] = useState(""),
     [limit, setLimit] = useState(60);
   const fileRef = useRef<HTMLInputElement>(null),
     coverRef = useRef<HTMLInputElement>(null),
@@ -288,6 +292,7 @@ export function BookmarkApp({
     metadataToken.current++;
     setDraft(emptyDraft(kind));
     setOcrStatus("");
+    setVisionStatus("");
     go("add");
   }
   function openSheet(name: string) {
@@ -349,24 +354,109 @@ export function BookmarkApp({
     setBusy(true);
     try {
       const id = await storeFile(file);
+      const nextKind = ["link", "video", "note"].includes(draft.kind)
+        ? draft.kind
+        : file.type.startsWith("image/")
+          ? "image"
+          : "file";
+
       changed({
         assetId: id,
         title: draft.title || file.name,
         fileName: file.name,
-        kind: ["link", "video", "note"].includes(draft.kind)
-          ? draft.kind
-          : file.type.startsWith("image/")
-            ? "image"
-            : "file",
+        kind: nextKind,
         preview: undefined,
         ocr: "",
+        visualText: "",
       });
+
+      if (file.type.startsWith("image/")) {
+        setTimeout(() => void runSmartImageAnalysis(id), 0);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
+  async function runSmartImageAnalysis(assetId = draft.assetId) {
+    if (!assetId) return;
+
+    const key = getVisionKey();
+
+    if (!key) {
+      setVisionStatus(
+        "Add your OpenRouter key in Profile to enable smart image analysis."
+      );
+      return;
+    }
+
+    setBusy(true);
+    setVisionStatus("Understanding image…");
+
+    try {
+      const a = await repo.get<{ blob: Blob }>("assets", assetId);
+
+      if (!a) throw Error("Image not found.");
+
+      const result = await analyzeImage(a.blob, key);
+
+      setDraft((current) => {
+        if (current.assetId !== assetId) return current;
+
+        const currentTags = current.tags
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean);
+
+        const tags = [
+          ...new Set([
+            ...result.tags,
+            ...currentTags
+          ])
+        ].slice(0, 14);
+
+        return {
+          ...current,
+
+          title:
+            !current.title.trim() ||
+            current.title === current.fileName
+              ? result.title
+              : current.title,
+
+          description:
+            result.description ||
+            current.description,
+
+          tags: tags.join(", "),
+
+          visualText: [
+            result.title,
+            result.description,
+            ...result.tags,
+            ...result.searchAliases,
+            ...result.objects,
+            ...result.contexts,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        };
+      });
+
+      setVisionStatus(
+        "Smart title, tags and searchable description added."
+      );
+    } catch (e) {
+      setVisionStatus(
+        (e as Error).message ||
+          "Smart image analysis failed. You can still save the image."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runOCR() {
     if (!draft.assetId) return;
     const assetId = draft.assetId;
@@ -440,6 +530,7 @@ export function BookmarkApp({
         updatedAt: Date.now(),
         favorite: old?.favorite ?? false,
         ocr: draft.ocr,
+        visualText: draft.visualText,
         assetId: draft.assetId,
         preview: draft.preview,
         fileName: draft.fileName,
@@ -469,7 +560,11 @@ export function BookmarkApp({
     }
   }
   function edit(b: Bookmark) {
-    setDraft({ ...b, tags: b.tags.join(", ") });
+    setDraft({
+      ...b,
+      visualText: b.visualText ?? "",
+      tags: b.tags.join(", ")
+    });
     setSheet("");
     go("add");
   }
@@ -1021,6 +1116,11 @@ export function BookmarkApp({
                   Extract text from image
                 </button>
               )}
+              {visionStatus && (
+                <p className="muted">
+                  {visionStatus}
+                </p>
+              )}
               {ocrStatus && (
                 <p role="status" className="hint">
                   {ocrStatus}
@@ -1196,6 +1296,43 @@ export function BookmarkApp({
         <>
           <header className="heading">
             <h1>Profile</h1>
+              <section
+                className="form-section"
+                style={{ marginTop: 18 }}
+              >
+                <label
+                  className="field-label"
+                  htmlFor="vision-key"
+                >
+                  Smart image search
+                </label>
+
+                <Input
+                  id="vision-key"
+                  type="password"
+                  defaultValue={getVisionKey()}
+                  placeholder="OpenRouter API key"
+                  autoComplete="off"
+                  onBlur={(e) => {
+                    setVisionKey(e.currentTarget.value);
+
+                    setToast(
+                      e.currentTarget.value.trim()
+                        ? "Vision key saved on this device"
+                        : "Vision key removed"
+                    );
+                  }}
+                />
+
+                <p
+                  className="muted"
+                  style={{ marginTop: 8 }}
+                >
+                  Stored only on this device.
+                  Used to create image titles,
+                  tags and search descriptions.
+                </p>
+              </section>
           </header>
           <div className="profile-brand">
             <img

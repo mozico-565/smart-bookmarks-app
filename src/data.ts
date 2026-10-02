@@ -17,6 +17,7 @@ export type Bookmark = {
   updatedAt: number;
   favorite: boolean;
   ocr: string;
+  visualText?: string;
   assetId?: string;
   preview?: string;
   fileName?: string;
@@ -110,6 +111,7 @@ export function searchBookmarks(
         b.description,
         b.tags.join(" "),
         b.ocr,
+        b.visualText ?? "",
         collections.find((c) => c.id === b.collectionId)?.name ?? "",
       ].join(" "),
     );
